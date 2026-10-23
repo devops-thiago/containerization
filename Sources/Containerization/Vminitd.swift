@@ -568,6 +568,8 @@ extension Vminitd {
         mode: UInt32 = 0,
         createParents: Bool = false,
         isArchive: Bool = false,
+        ownerUID: UInt32? = nil,
+        ownerGID: UInt32? = nil,
         onMetadata: @Sendable @escaping (CopyMetadata) -> Void = { _ in }
     ) async throws {
         let request = Com_Apple_Containerization_Sandbox_V3_CopyRequest.with {
@@ -578,6 +580,8 @@ extension Vminitd {
             $0.createParents = createParents
             $0.vsockPort = vsockPort
             $0.isArchive = isArchive
+            if let ownerUID { $0.ownerUid = ownerUID }
+            if let ownerGID { $0.ownerGid = ownerGID }
         }
 
         try await client.copy(

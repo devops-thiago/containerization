@@ -846,6 +846,25 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
   /// Absolute path of the target root filesystem in the guest.
   public var root: String = String()
 
+  /// Required for COPY_IN_OWNED_FILE; zero is a valid explicit owner.
+  public var ownerUid: UInt32 {
+    get {_ownerUid ?? 0}
+    set {_ownerUid = newValue}
+  }
+  /// Returns true if `ownerUid` has been explicitly set.
+  public var hasOwnerUid: Bool {self._ownerUid != nil}
+  /// Clears the value of `ownerUid`. Subsequent reads from it will return its default value.
+  public mutating func clearOwnerUid() {self._ownerUid = nil}
+
+  public var ownerGid: UInt32 {
+    get {_ownerGid ?? 0}
+    set {_ownerGid = newValue}
+  }
+  /// Returns true if `ownerGid` has been explicitly set.
+  public var hasOwnerGid: Bool {self._ownerGid != nil}
+  /// Clears the value of `ownerGid`. Subsequent reads from it will return its default value.
+  public mutating func clearOwnerGid() {self._ownerGid = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum Direction: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -856,6 +875,10 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
 
     /// Copy from guest to host.
     case copyOut // = 1
+
+    /// Copy one regular file into the guest and set its owner. A distinct operation makes
+    /// older agents reject the request instead of silently ignoring ownership fields.
+    case copyInOwnedFile // = 2
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -866,6 +889,7 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
       switch rawValue {
       case 0: self = .copyIn
       case 1: self = .copyOut
+      case 2: self = .copyInOwnedFile
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -874,6 +898,7 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
       switch self {
       case .copyIn: return 0
       case .copyOut: return 1
+      case .copyInOwnedFile: return 2
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -882,11 +907,15 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
     public static let allCases: [Com_Apple_Containerization_Sandbox_V3_CopyRequest.Direction] = [
       .copyIn,
       .copyOut,
+      .copyInOwnedFile,
     ]
 
   }
 
   public init() {}
+
+  fileprivate var _ownerUid: UInt32? = nil
+  fileprivate var _ownerGid: UInt32? = nil
 }
 
 public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyResponse: Sendable {
@@ -3069,7 +3098,7 @@ nonisolated extension Com_Apple_Containerization_Sandbox_V3_WriteFileResponse: S
 
 nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CopyRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}direction\0\u{1}path\0\u{1}mode\0\u{3}create_parents\0\u{3}vsock_port\0\u{3}is_archive\0\u{1}root\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}direction\0\u{1}path\0\u{1}mode\0\u{3}create_parents\0\u{3}vsock_port\0\u{3}is_archive\0\u{1}root\0\u{3}owner_uid\0\u{3}owner_gid\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3084,12 +3113,18 @@ nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest: SwiftPr
       case 5: try { try decoder.decodeSingularUInt32Field(value: &self.vsockPort) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.isArchive) }()
       case 7: try { try decoder.decodeSingularStringField(value: &self.root) }()
+      case 8: try { try decoder.decodeSingularUInt32Field(value: &self._ownerUid) }()
+      case 9: try { try decoder.decodeSingularUInt32Field(value: &self._ownerGid) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.direction != .copyIn {
       try visitor.visitSingularEnumField(value: self.direction, fieldNumber: 1)
     }
@@ -3111,6 +3146,12 @@ nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest: SwiftPr
     if !self.root.isEmpty {
       try visitor.visitSingularStringField(value: self.root, fieldNumber: 7)
     }
+    try { if let v = self._ownerUid {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 8)
+    } }()
+    try { if let v = self._ownerGid {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3122,13 +3163,15 @@ nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest: SwiftPr
     if lhs.vsockPort != rhs.vsockPort {return false}
     if lhs.isArchive != rhs.isArchive {return false}
     if lhs.root != rhs.root {return false}
+    if lhs._ownerUid != rhs._ownerUid {return false}
+    if lhs._ownerGid != rhs._ownerGid {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
 nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest.Direction: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COPY_IN\0\u{1}COPY_OUT\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COPY_IN\0\u{1}COPY_OUT\0\u{1}COPY_IN_OWNED_FILE\0")
 }
 
 nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
