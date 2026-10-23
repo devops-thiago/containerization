@@ -879,6 +879,10 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
     /// Copy one regular file into the guest and set its owner. A distinct operation makes
     /// older agents reject the request instead of silently ignoring ownership fields.
     case copyInOwnedFile // = 2
+
+    /// Extract an archive without replacing a directory with a non-directory or vice versa.
+    /// Older agents must reject this policy rather than silently ignoring it.
+    case copyInCheckedArchive // = 3
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -890,6 +894,7 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
       case 0: self = .copyIn
       case 1: self = .copyOut
       case 2: self = .copyInOwnedFile
+      case 3: self = .copyInCheckedArchive
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -899,6 +904,7 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
       case .copyIn: return 0
       case .copyOut: return 1
       case .copyInOwnedFile: return 2
+      case .copyInCheckedArchive: return 3
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -908,6 +914,7 @@ public nonisolated struct Com_Apple_Containerization_Sandbox_V3_CopyRequest: Sen
       .copyIn,
       .copyOut,
       .copyInOwnedFile,
+      .copyInCheckedArchive,
     ]
 
   }
@@ -3171,7 +3178,7 @@ nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest: SwiftPr
 }
 
 nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyRequest.Direction: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COPY_IN\0\u{1}COPY_OUT\0\u{1}COPY_IN_OWNED_FILE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COPY_IN\0\u{1}COPY_OUT\0\u{1}COPY_IN_OWNED_FILE\0\u{1}COPY_IN_CHECKED_ARCHIVE\0")
 }
 
 nonisolated extension Com_Apple_Containerization_Sandbox_V3_CopyResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

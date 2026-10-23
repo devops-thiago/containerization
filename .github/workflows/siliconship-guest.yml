@@ -22,7 +22,7 @@ jobs:
       - name: Install build dependencies
         run: apt-get update && apt-get install -y curl make e2fsprogs libarchive-dev libbz2-dev liblzma-dev libssl-dev
       - name: Test guest filesystem behavior
-        run: swift test --force-resolved-versions --jobs 4 --filter 'SingleFileCopyTests|RootfsResolverTests'
+        run: swift test --force-resolved-versions --jobs 4 --filter 'SingleFileCopyTests|RootfsResolverTests|ArchiveTests.checkedArchive'
       - name: Install verified static SDK
         run: make -C vminitd linux-sdk
       - name: Build static guest and filesystem

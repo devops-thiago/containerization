@@ -92,6 +92,7 @@ public enum FileDescriptorOps {
     ///   - relativePath: The path to create, relative to `fd`.
     ///   - permissions: The permissions to give the directory (default 0o755).
     ///   - makeIntermediates: Create or replace intermediate components as needed.
+    ///   - replaceNonDirectories: Whether existing non-directories may be removed (default true).
     ///   - completion: A function that operates on the new directory fd.
     /// - Throws: `FileDescriptorOps.Error` if path validation or system errors occur.
     public static func mkdir(
@@ -99,6 +100,7 @@ public enum FileDescriptorOps {
         _ relativePath: FilePath,
         permissions: FilePermissions? = nil,
         makeIntermediates: Bool = false,
+        replaceNonDirectories: Bool = true,
         completion: (FileDescriptor) throws -> Void = { _ in }
     ) throws {
         try validateRelativePath(relativePath)
@@ -107,6 +109,7 @@ public enum FileDescriptorOps {
             relativePath.components,
             permissions: permissions,
             makeIntermediates: makeIntermediates,
+            replaceNonDirectories: replaceNonDirectories,
             completion: completion
         )
     }
@@ -229,6 +232,7 @@ public enum FileDescriptorOps {
         _ relativeComponents: FilePath.ComponentView,
         permissions: FilePermissions? = nil,
         makeIntermediates: Bool,
+        replaceNonDirectories: Bool,
         completion: (FileDescriptor) throws -> Void
     ) throws {
         guard let currentComponent = relativeComponents.first else {
@@ -243,6 +247,9 @@ public enum FileDescriptorOps {
                 throw Error.invalidPathComponent
             }
             if errno != ENOENT {
+                guard replaceNonDirectories else {
+                    throw Error.systemError("refusing to replace a non-directory during mkdir", errno)
+                }
                 try unlinkRecursive(fd, filename: currentComponent)
             }
 
@@ -266,7 +273,7 @@ public enum FileDescriptorOps {
 
         try mkdir(
             componentFileDescriptor, childComponents,
-            permissions: permissions, makeIntermediates: makeIntermediates, completion: completion)
+            permissions: permissions, makeIntermediates: makeIntermediates, replaceNonDirectories: replaceNonDirectories, completion: completion)
     }
 
     private static func enumerateHelper(

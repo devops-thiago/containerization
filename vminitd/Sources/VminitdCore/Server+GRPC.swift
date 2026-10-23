@@ -461,7 +461,7 @@ extension Initd: Com_Apple_Containerization_Sandbox_V3_SandboxContext.SimpleServ
 
         do {
             switch request.direction {
-            case .copyIn, .copyInOwnedFile:
+            case .copyIn, .copyInOwnedFile, .copyInCheckedArchive:
                 try await handleCopyIn(request: request, response: response)
             case .copyOut:
                 try await handleCopyOut(request: request, response: response)
@@ -503,6 +503,10 @@ extension Initd: Com_Apple_Containerization_Sandbox_V3_SandboxContext.SimpleServ
         let path = request.path
         let isArchive = request.isArchive
         let owner = try SingleFileCopy.owner(for: request)
+        let noOverwrite = request.direction == .copyInCheckedArchive
+        guard !noOverwrite || isArchive else {
+            throw RPCError(code: .invalidArgument, message: "checked archive copy requires an archive payload")
+        }
 
         // Connect to the host's vsock port for data transfer.
         let vsockType = VsockType(port: request.vsockPort, cid: VsockType.hostCID)
@@ -525,13 +529,16 @@ extension Initd: Com_Apple_Containerization_Sandbox_V3_SandboxContext.SimpleServ
             }
 
             // /proc/self/fd pins the resolved directory against path swaps during extraction.
-            return try RootfsResolver.withDirectoryInRoot(dirFd: rootFd, path: path) { destFd in
+            return try RootfsResolver.withDirectoryInRoot(dirFd: rootFd, path: path, followFinalSymlink: !noOverwrite) { destFd in
                 let fileHandle = FileHandle(fileDescriptor: sockFd, closeOnDealloc: false)
                 let reader = try ArchiveReader(format: .pax, filter: .gzip, fileHandle: fileHandle)
-                return try reader.extractContents(to: URL(fileURLWithPath: "/proc/self/fd/\(destFd)"))
+                return try reader.extractContents(to: URL(fileURLWithPath: "/proc/self/fd/\(destFd)"), noOverwriteDirNonDir: noOverwrite)
             }
         }
 
+        if noOverwrite, !rejected.isEmpty {
+            throw RPCError(code: .invalidArgument, message: "checked archive contains refused paths: \(rejected.joined(separator: ", "))")
+        }
         if !rejected.isEmpty {
             log.info("copy: archive extracted", metadata: ["path": "\(path)", "rejectedCount": "\(rejected.count)"])
             for rejectedPath in rejected {

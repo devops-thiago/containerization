@@ -242,6 +242,9 @@ message CopyRequest {
     // Copy one regular file into the guest and set its owner. A distinct operation makes
     // older agents reject the request instead of silently ignoring ownership fields.
     COPY_IN_OWNED_FILE = 2;
+    // Extract an archive without replacing a directory with a non-directory or vice versa.
+    // Older agents must reject this policy rather than silently ignoring it.
+    COPY_IN_CHECKED_ARCHIVE = 3;
   }
   // Direction of the copy operation.
   Direction direction = 1;

@@ -56,6 +56,22 @@ struct SingleFileCopyTests {
         }
     }
 
+    @Test("checked archive destinations refuse a final symlink but ordinary directories still resolve it")
+    func checkedArchiveRoot() throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        try FileManager.default.createDirectory(at: f.path("target"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: f.path("link").path, withDestinationPath: "/target")
+        let root = open(f.root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        defer { close(root) }
+        try #require(root >= 0)
+        #expect(throws: (any Error).self) {
+            try RootfsResolver.withDirectoryInRoot(dirFd: root, path: "link", followFinalSymlink: false) { _ in }
+        }
+        try RootfsResolver.withDirectoryInRoot(dirFd: root, path: "link") { fd in #expect(fd >= 0) }
+        #expect(try f.info("link").st_mode & S_IFMT == S_IFLNK)
+    }
+
     @Test("a file cannot replace a directory or erase its contents")
     func directoryCollision() throws {
         let f = try Fixture()
@@ -67,12 +83,12 @@ struct SingleFileCopyTests {
         #expect(try f.info("destination/item").st_mode & S_IFMT == S_IFDIR)
     }
 
-    @Test("a final symlink is retained and its in-root target receives contents and ownership", arguments: [false, true])
-    func symlink(dangling: Bool) throws {
+    @Test("a final symlink is retained and its in-root target receives contents and ownership", arguments: [false, true], [false, true])
+    func symlink(dangling: Bool, relative: Bool) throws {
         let f = try Fixture()
         defer { f.clean() }
         if !dangling { try Data("old".utf8).write(to: f.path("target")) }
-        try FileManager.default.createSymbolicLink(atPath: f.path("link").path, withDestinationPath: "/target")
+        try FileManager.default.createSymbolicLink(atPath: f.path("link").path, withDestinationPath: relative ? "target" : "/target")
         try f.copy(to: "link", owner: f.owner)
         #expect(try f.info("link").st_mode & S_IFMT == S_IFLNK)
         #expect(try String(contentsOf: f.path("target"), encoding: .utf8) == "new contents")

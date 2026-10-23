@@ -23,6 +23,57 @@ import Testing
 @testable import ContainerizationArchive
 
 struct ArchiveTests {
+    @Test("checked archives preserve a nonempty directory at a file entry", arguments: [false, true])
+    func checkedArchivePreservesDirectory(symlink: Bool) throws {
+        let top = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: top) }
+        let destination = top.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: destination.appendingPathComponent("nested/item/deep"), withIntermediateDirectories: true)
+        let sentinel = destination.appendingPathComponent("nested/item/deep/keep")
+        try Data("keep".utf8).write(to: sentinel)
+        let archive = top.appendingPathComponent("archive.tar.gz")
+        let writer = try ArchiveWriter(format: .pax, filter: .gzip, file: archive)
+        let payload = symlink ? Data() : Data("replace".utf8)
+        let entry = helperEntry(path: "nested/item", data: payload)
+        if symlink {
+            entry.fileType = .symbolicLink
+            entry.symlinkTarget = "target"
+        }
+        try writer.writeEntry(entry: entry, data: payload)
+        try writer.finishEncoding()
+        let reader = try ArchiveReader(file: archive)
+        #expect(throws: (any Error).self) { try reader.extractContents(to: destination, noOverwriteDirNonDir: true) }
+        #expect(try Data(contentsOf: sentinel) == Data("keep".utf8))
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("nested/item").path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+    }
+
+    @Test("checked archives overwrite ordinary files and refuse a directory over a file")
+    func checkedArchivePreservesFileKinds() throws {
+        let top = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: top) }
+        try FileManager.default.createDirectory(at: top, withIntermediateDirectories: true)
+        let destination = top.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let file = destination.appendingPathComponent("file")
+        let conflict = destination.appendingPathComponent("directory")
+        try Data("old".utf8).write(to: file)
+        try Data("keep".utf8).write(to: conflict)
+        let archive = top.appendingPathComponent("archive.tar.gz")
+        let writer = try ArchiveWriter(format: .pax, filter: .gzip, file: archive)
+        let payload = Data("new".utf8)
+        try writer.writeEntry(entry: helperEntry(path: "file", data: payload), data: payload)
+        let directory = helperEntry(path: "directory", data: Data())
+        directory.fileType = .directory
+        try writer.writeEntry(entry: directory, data: Data())
+        try writer.finishEncoding()
+        let reader = try ArchiveReader(file: archive)
+        #expect(throws: (any Error).self) { try reader.extractContents(to: destination, noOverwriteDirNonDir: true) }
+        #expect(try Data(contentsOf: file) == payload)
+        #expect(try Data(contentsOf: conflict) == Data("keep".utf8))
+    }
+
     func helperEntry(path: String, data: Data) -> WriteEntry {
         let entry = WriteEntry()
         entry.permissions = 0o644
