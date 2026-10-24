@@ -461,7 +461,7 @@ extension Initd: Com_Apple_Containerization_Sandbox_V3_SandboxContext.SimpleServ
 
         do {
             switch request.direction {
-            case .copyIn:
+            case .copyIn, .copyInOwnedFile, .copyInCheckedArchive:
                 try await handleCopyIn(request: request, response: response)
             case .copyOut:
                 try await handleCopyOut(request: request, response: response)
@@ -502,6 +502,11 @@ extension Initd: Com_Apple_Containerization_Sandbox_V3_SandboxContext.SimpleServ
         let root = request.root
         let path = request.path
         let isArchive = request.isArchive
+        let owner = try SingleFileCopy.owner(for: request)
+        let noOverwrite = request.direction == .copyInCheckedArchive
+        guard !noOverwrite || isArchive else {
+            throw RPCError(code: .invalidArgument, message: "checked archive copy requires an archive payload")
+        }
 
         // Connect to the host's vsock port for data transfer.
         let vsockType = VsockType(port: request.vsockPort, cid: VsockType.hostCID)
@@ -517,55 +522,23 @@ extension Initd: Com_Apple_Containerization_Sandbox_V3_SandboxContext.SimpleServ
             defer { close(rootFd) }
 
             guard isArchive else {
-                if request.createParents {
-                    try RootfsResolver.createDirectoryInRoot(dirFd: rootFd, path: FilePath(path).removingLastComponent().string)
-                }
-
-                let mode = request.mode > 0 ? UInt64(request.mode) : 0o644
-                let fd = RootfsResolver.openInRoot(dirFd: rootFd, path: path, flags: O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode: mode)
-                guard fd != -1 else {
-                    throw RPCError(
-                        code: .internalError,
-                        message: "copy: failed to open file '\(path)': \(swiftErrno("openat2"))"
-                    )
-                }
-                defer { close(fd) }
-
-                var buf = [UInt8](repeating: 0, count: Self.copyChunkSize)
-                while true {
-                    let n = read(sockFd, &buf, buf.count)
-                    if n == 0 { break }
-                    guard n > 0 else {
-                        throw RPCError(
-                            code: .internalError,
-                            message: "copy: vsock read error: \(swiftErrno("read"))"
-                        )
-                    }
-                    var written = 0
-                    while written < n {
-                        let w = buf.withUnsafeBytes { ptr in
-                            write(fd, ptr.baseAddress! + written, n - written)
-                        }
-                        guard w > 0 else {
-                            throw RPCError(
-                                code: .internalError,
-                                message: "copy: write error: \(swiftErrno("write"))"
-                            )
-                        }
-                        written += w
-                    }
-                }
+                try SingleFileCopy.copy(
+                    from: sockFd, root: rootFd, path: path, mode: request.mode,
+                    createParents: request.createParents, owner: owner)
                 return []
             }
 
             // /proc/self/fd pins the resolved directory against path swaps during extraction.
-            return try RootfsResolver.withDirectoryInRoot(dirFd: rootFd, path: path) { destFd in
+            return try RootfsResolver.withDirectoryInRoot(dirFd: rootFd, path: path, followFinalSymlink: !noOverwrite) { destFd in
                 let fileHandle = FileHandle(fileDescriptor: sockFd, closeOnDealloc: false)
                 let reader = try ArchiveReader(format: .pax, filter: .gzip, fileHandle: fileHandle)
-                return try reader.extractContents(to: URL(fileURLWithPath: "/proc/self/fd/\(destFd)"))
+                return try reader.extractContents(to: URL(fileURLWithPath: "/proc/self/fd/\(destFd)"), noOverwriteDirNonDir: noOverwrite)
             }
         }
 
+        if noOverwrite, !rejected.isEmpty {
+            throw RPCError(code: .invalidArgument, message: "checked archive contains refused paths: \(rejected.joined(separator: ", "))")
+        }
         if !rejected.isEmpty {
             log.info("copy: archive extracted", metadata: ["path": "\(path)", "rejectedCount": "\(rejected.count)"])
             for rejectedPath in rejected {

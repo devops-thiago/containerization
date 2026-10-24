@@ -49,6 +49,9 @@ extension FileDescriptorOps {
     ///   - relativePath: The directory to open or create. It must be relative and must not contain a `..` component.
     ///   - permissions: The permissions for each directory this call creates (default 0o755).
     ///   - makeIntermediates: Also create missing intermediate directories.
+    ///   - replaceNonDirectories: Whether a non-directory in the way may be removed (default true).
+    ///     When false, such an entry fails the call with ``Error/systemError(_:_:)`` instead of
+    ///     being replaced, so an extraction that asked for this stops rather than skipping the entry.
     ///   - completion: A function that operates on the directory descriptor.
     /// - Throws: ``Error/invalidRelativePath`` for an absolute path or one containing `..`;
     ///   ``Error/invalidPathComponent`` if an intermediate component is missing, or is not a
@@ -59,6 +62,7 @@ extension FileDescriptorOps {
         _ relativePath: FilePath,
         permissions: FilePermissions? = nil,
         makeIntermediates: Bool = false,
+        replaceNonDirectories: Bool = true,
         completion: (FileDescriptor) throws -> Void = { _ in }
     ) throws {
         try validateRelativePath(relativePath)
@@ -78,7 +82,8 @@ extension FileDescriptorOps {
                 current,
                 component,
                 permissions: permissions,
-                allowCreate: makeIntermediates || isLast
+                allowCreate: makeIntermediates || isLast,
+                replaceNonDirectories: replaceNonDirectories
             )
             if ownsCurrent {
                 try? current.close()
@@ -233,7 +238,8 @@ extension FileDescriptorOps {
         _ parent: FileDescriptor,
         _ name: FilePath.Component,
         permissions: FilePermissions?,
-        allowCreate: Bool
+        allowCreate: Bool,
+        replaceNonDirectories: Bool
     ) throws -> FileDescriptor {
         do {
             return try openDirectory(parent, name)
@@ -248,6 +254,9 @@ extension FileDescriptorOps {
                 // and not its target, and it never removes a directory.
                 guard allowCreate else {
                     throw Error.invalidPathComponent
+                }
+                guard replaceNonDirectories else {
+                    throw Error.systemError("refusing to replace a non-directory during mkdir", Errno.notDirectory.rawValue)
                 }
                 try unlink(parent, name)
             default:

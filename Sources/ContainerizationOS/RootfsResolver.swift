@@ -83,7 +83,8 @@ public enum RootfsResolver {
     /// root; missing components are created. The descriptor passed to `body` is
     /// valid only for its duration and must not be closed by it.
     public static func withDirectoryInRoot<T>(
-        dirFd rootFd: Int32, path: String, perms: mode_t = 0o755, confinement: Int32 = RESOLVE_IN_ROOT, _ body: (Int32) throws -> T
+        dirFd rootFd: Int32, path: String, perms: mode_t = 0o755, confinement: Int32 = RESOLVE_IN_ROOT, followFinalSymlink: Bool = true,
+        _ body: (Int32) throws -> T
     ) throws -> T {
         // Avoid C string truncation before the mkdirat/openat component walk.
         guard !path.utf8.contains(0) else {
@@ -102,7 +103,8 @@ public enum RootfsResolver {
         var firstMissing = components.count
         for i in components.indices {
             let subpath = components[0...i].joined(separator: "/")
-            let fd = openInRoot(dirFd: rootFd, path: subpath, flags: O_RDONLY | O_DIRECTORY | O_CLOEXEC, confinement: confinement)
+            let noFollow = !followFinalSymlink && i == components.count - 1 ? O_NOFOLLOW : 0
+            let fd = openInRoot(dirFd: rootFd, path: subpath, flags: O_RDONLY | O_DIRECTORY | O_CLOEXEC | noFollow, confinement: confinement)
             if fd < 0 {
                 guard errno == ENOENT else {
                     throw Error.errno(errno, "resolve '\(subpath)' within root")
