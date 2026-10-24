@@ -239,6 +239,12 @@ message CopyRequest {
     COPY_IN = 0;
     // Copy from guest to host.
     COPY_OUT = 1;
+    // Copy one regular file into the guest and set its owner. A distinct operation makes
+    // older agents reject the request instead of silently ignoring ownership fields.
+    COPY_IN_OWNED_FILE = 2;
+    // Extract an archive without replacing a directory with a non-directory or vice versa.
+    // Older agents must reject this policy rather than silently ignoring it.
+    COPY_IN_CHECKED_ARCHIVE = 3;
   }
   // Direction of the copy operation.
   Direction direction = 1;
@@ -255,6 +261,9 @@ message CopyRequest {
   bool is_archive = 6;
   // Absolute path of the target root filesystem in the guest.
   string root = 7;
+  // Required for COPY_IN_OWNED_FILE; zero is a valid explicit owner.
+  optional uint32 owner_uid = 8;
+  optional uint32 owner_gid = 9;
 }
 
 message CopyResponse {

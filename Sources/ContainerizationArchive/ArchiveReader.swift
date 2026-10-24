@@ -262,7 +262,7 @@ extension ArchiveReader {
     /// Rejects member paths that escape the root directory or traverse
     /// symbolic links, and uses a "last entry wins" replacement policy
     /// for an existing file at a path to be extracted.
-    public func extractContents(to directory: URL) throws -> [String] {
+    public func extractContents(to directory: URL, noOverwriteDirNonDir: Bool = false) throws -> [String] {
         // Create the root directory with standard permissions
         // and create a FileDescriptor for secure path traversal.
         let fm = FileManager.default
@@ -285,7 +285,8 @@ extension ArchiveReader {
                 entry: entry,
                 dataReader: dataReader,
                 memberPath: memberPath,
-                rootFileDescriptor: rootFileDescriptor
+                rootFileDescriptor: rootFileDescriptor,
+                noOverwriteDirNonDir: noOverwriteDirNonDir
             )
 
             if !extracted {
@@ -328,7 +329,8 @@ extension ArchiveReader {
         entry: WriteEntry,
         dataReader: ArchiveEntryReader,
         memberPath: FilePath,
-        rootFileDescriptor: FileDescriptor
+        rootFileDescriptor: FileDescriptor,
+        noOverwriteDirNonDir: Bool
     ) throws -> Bool {
         guard let lastComponent = memberPath.lastComponent else {
             return false
@@ -339,9 +341,17 @@ extension ArchiveReader {
         do {
             switch type {
             case .regular:
-                try FileDescriptorOps.mkdir(rootFileDescriptor, relativePath, makeIntermediates: true) { fd in
+                try FileDescriptorOps.mkdir(rootFileDescriptor, relativePath, makeIntermediates: true, replaceNonDirectories: !noOverwriteDirNonDir) { fd in
                     // Remove existing entry if present (mimics containerd's "last entry wins" behavior)
-                    try? FileDescriptorOps.unlinkRecursive(fd, filename: lastComponent)
+                    if noOverwriteDirNonDir {
+                        // unlinkat without AT_REMOVEDIR can never remove a directory, even
+                        // if another process swaps the final entry after path resolution.
+                        if unlinkat(fd.rawValue, lastComponent.string, 0) != 0 && errno != ENOENT {
+                            throw ArchiveError.failedToExtractArchive("cannot replace non-file entry: \(memberPath)")
+                        }
+                    } else {
+                        try? FileDescriptorOps.unlinkRecursive(fd, filename: lastComponent)
+                    }
 
                     // Open file for writing using openat with O_NOFOLLOW to prevent TOC-TOU attacks
                     let fileMode = entry.permissions & 0o777  // Mask to permission bits only
@@ -355,7 +365,7 @@ extension ArchiveReader {
                     setFileAttributes(fd: fileFd, entry: entry)
                 }
             case .directory:
-                try FileDescriptorOps.mkdir(rootFileDescriptor, memberPath, makeIntermediates: true) { fd in
+                try FileDescriptorOps.mkdir(rootFileDescriptor, memberPath, makeIntermediates: true, replaceNonDirectories: !noOverwriteDirNonDir) { fd in
                     setFileAttributes(fd: fd.rawValue, entry: entry)
                 }
             case .symbolicLink:
@@ -363,9 +373,17 @@ extension ArchiveReader {
                     return false
                 }
                 var symlinkCreated = false
-                try FileDescriptorOps.mkdir(rootFileDescriptor, relativePath, makeIntermediates: true) { fd in
+                try FileDescriptorOps.mkdir(rootFileDescriptor, relativePath, makeIntermediates: true, replaceNonDirectories: !noOverwriteDirNonDir) { fd in
                     // Remove existing entry if present (mimics containerd's "last entry wins" behavior)
-                    try? FileDescriptorOps.unlinkRecursive(fd, filename: lastComponent)
+                    if noOverwriteDirNonDir {
+                        // unlinkat without AT_REMOVEDIR can never remove a directory, even
+                        // if another process swaps the final entry after path resolution.
+                        if unlinkat(fd.rawValue, lastComponent.string, 0) != 0 && errno != ENOENT {
+                            throw ArchiveError.failedToExtractArchive("cannot replace non-file entry: \(memberPath)")
+                        }
+                    } else {
+                        try? FileDescriptorOps.unlinkRecursive(fd, filename: lastComponent)
+                    }
 
                     guard symlinkat(targetPath.string, fd.rawValue, lastComponent.string) == 0 else {
                         throw ArchiveError.failedToExtractArchive("failed to create symlink: \(targetPath) <- \(memberPath)")

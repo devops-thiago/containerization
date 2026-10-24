@@ -1,0 +1,68 @@
+name: SiliconShip guest backport
+
+on:
+  pull_request:
+    branches: [siliconship/1.6.0]
+  push:
+    branches: [codex/659-owned-file-copy]
+
+permissions:
+  contents: read
+
+jobs:
+  guest:
+    if: github.repository == 'devops-thiago/containerization'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    container: swift:6.3.0-noble
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+      - name: Install build dependencies
+        run: apt-get update && apt-get install -y curl make e2fsprogs libarchive-dev libbz2-dev liblzma-dev libssl-dev
+      - name: Test guest filesystem behavior
+        run: swift test --force-resolved-versions --jobs 4 --filter 'SingleFileCopyTests|RootfsResolverTests|ArchiveTests.checkedArchive'
+      - name: Install verified static SDK
+        run: make -C vminitd linux-sdk
+      - name: Build static guest and filesystem
+        run: |
+          make -C vminitd MUSL_ARCH=aarch64 BUILD_CONFIGURATION=release
+          ./scripts/build-initfs.sh --vminitd vminitd/bin/vminitd --vmexec vminitd/bin/vmexec --ext4 bin/initfs.ext4 --tar bin/init.rootfs.tar.gz
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: siliconship-guest
+          path: bin/init.rootfs.tar.gz
+          if-no-files-found: error
+
+  package:
+    if: github.event_name == 'push' && github.repository == 'devops-thiago/containerization'
+    needs: guest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: siliconship-guest
+          path: guest
+      - name: Publish candidate guest by commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          cat > guest/Dockerfile <<'EOF'
+          FROM scratch
+          ADD init.rootfs.tar.gz /
+          LABEL org.opencontainers.image.source="https://github.com/devops-thiago/containerization"
+          EOF
+          image="ghcr.io/devops-thiago/containerization/vminit:sha-$SOURCE_SHA"
+          docker build --platform linux/arm64 --label "org.opencontainers.image.revision=$SOURCE_SHA" -t "$image" guest
+          docker push "$image"
+          docker inspect --format '{{index .RepoDigests 0}}' "$image" >> "$GITHUB_STEP_SUMMARY"
